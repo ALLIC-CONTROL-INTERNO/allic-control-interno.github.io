@@ -6755,7 +6755,8 @@ function cuerpo8(e, edicion) {
   const defHTML = d => { const {val} = atributosDe(e, d);
     return `<div class="inf-def"><h4>${++nd}. ${esc(val.tit)}</h4><table class="inf-atr"><tbody>
       ${CAMPOS_ATR.map(([k, nom]) => `<tr><td class="k">${nom}</td><td>${esc(val[k]).replace(/\n/g, '<br>')}</td></tr>`).join('')}
-      ${CAMPOS_GER.map(([k, nom, , vacio]) => `<tr><td class="k">${nom}</td><td>${val[k].trim() ? esc(val[k]).replace(/\n/g, '<br>') : `<i>${vacio}</i>`}</td></tr>`).join('')}
+      ${CAMPOS_GER.filter(([k]) => k === 'com' || val[k].trim())   // 2026-11-05: Responsable y Plazo vacíos no aparecen en el informe (antes decían «Por definir.»)
+        .map(([k, nom, , vacio]) => `<tr><td class="k">${nom}</td><td>${val[k].trim() ? esc(val[k]).replace(/\n/g, '<br>') : `<i>${vacio}</i>`}</td></tr>`).join('')}
       <tr><td class="k">Tipo</td><td>${d.nivel === 'parcial' ? 'Cumplimiento parcial' : `No se cumple · deficiencia ${d.tipoDef ? TIPO_DEF[d.tipoDef].toLowerCase() : 'sin tipo indicado'}`}</td></tr>
       <tr><td class="k">Componente</td><td>${esc(d.componente)} · ${esc(d.seccion)}${d.ref ? ` · Ref. P/T: ${esc(d.ref)}` : ''}</td></tr></tbody></table></div>`; };
   out.push(h3('Deficiencias de control interno') + (Df.length
