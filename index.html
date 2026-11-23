@@ -5259,7 +5259,7 @@ const DESC_COMP = {
   ACT:'Acciones definidas en políticas y procedimientos para reducir los riesgos: autorizaciones, conciliaciones, separación de funciones y controles sobre la tecnología.',
   IC:'Información de calidad y comunicación interna y externa que permiten que cada persona cumpla sus responsabilidades de control.',
   SUP:'Evaluaciones continuas o independientes para comprobar que los controles funcionan, y comunicación y corrección de las deficiencias.',
-  CQ:'Preguntas por rubro de los estados financieros. Cada rubro tiene unas 3 preguntas que combinan los cinco componentes del control interno; el auditor puede añadir las suyas.'
+  CQ:'Preguntas por rubro de los estados financieros. Solo aparecen los rubros con cuentas elegidas en Áreas de riesgo. Cada rubro tiene unas 3 preguntas que combinan los cinco componentes del control interno; el auditor puede añadir las suyas.'
 };
 /* Pestañas del módulo: los 5 componentes (preguntas generales) y el cuestionario por rubros */
 const PESTANAS5 = [...Object.keys(COMPONENTES), 'CQ'];
@@ -5351,9 +5351,24 @@ async function quitarPropia(rk, id) {
   guardarLuego(); pintarCOSO();
 }
 
-/* Secciones de cada pestaña: los principios del componente, o los 10 rubros en la pestaña Cuestionario */
-function seccionesComp(e, comp) {
-  if (comp === 'CQ') return RUBROS_Q.map((r, i) => seccionRubro(e, rubroAdaptado(r, e.empresa?.tipo), i));
+/* RUBROS DEL CUESTIONARIO: rubros con cuentas elegidas en Áreas de riesgo (vacío si la selección no está confirmada
+   o no hay estados financieros). Se guarda el resultado mientras no cambie el encargo, porque se consulta muchas veces. */
+const _rubrosCQ = new WeakMap();
+function rubrosElegidosCQ(e) {
+  if (!e.riesgos?.confirmado || !(e.eeff?.actual?.bg && e.eeff?.actual?.er)) return new Set();
+  const clave = JSON.stringify([e.actualizado, e.riesgos.sel, e.riesgos.mat, e.empresa?.tipo, e.eeff.sel]);
+  const c = _rubrosCQ.get(e);
+  if (c && c.clave === clave) return c.set;
+  const set = new Set(evaluarCuentas(e).filter(i => estadoSel(e, i).on).map(rubroQItem).filter(Boolean));
+  _rubrosCQ.set(e, {clave, set});
+  return set;
+}
+
+/* Secciones de cada pestaña: los principios del componente, o los rubros en la pestaña Cuestionario.
+   RUBROS DEL CUESTIONARIO: solo los rubros elegidos; todos = true da los 10 (lo usa la matriz para el contexto de cada rubro) */
+function seccionesComp(e, comp, todos = false) {
+  if (comp === 'CQ') { const el = rubrosElegidosCQ(e);
+    return RUBROS_Q.filter(r => todos || el.has(r.k)).map((r, i) => seccionRubro(e, rubroAdaptado(r, e.empresa?.tipo), i)); }
   return CUEST_GENERAL.filter(s => s.c === comp).map(s => ({k:'p' + s.p, clase:'principio', n:`Principio ${s.p}`, titulo:s.n, of:s.of, p:s.p,
     grupos:[{preguntas:preguntasPrincipio(s)}]}));
 }
@@ -5423,8 +5438,19 @@ function htmlCOSO() {
 function pintarCOSO() {
   if (!$('m5Res')) return;
   const S = seccionesComp(actual, ui5.comp);
-  ui5.idx[ui5.comp] = Math.min(ui5.idx[ui5.comp] || 0, S.length - 1);
+  ui5.idx[ui5.comp] = Math.max(0, Math.min(ui5.idx[ui5.comp] || 0, S.length - 1));
   sec5 = S[ui5.idx[ui5.comp]];
+  // RUBROS DEL CUESTIONARIO: sin rubros elegidos, un aviso en lugar de la lista
+  if (!sec5) {
+    const e = actual, hayEEFF = e.eeff?.actual.bg && e.eeff?.actual.er;
+    const msg = !hayEEFF ? 'Primero carga los estados financieros y confirma las áreas de riesgo.'
+      : !e.riesgos?.confirmado ? 'Primero confirma las áreas de riesgo: el cuestionario muestra solo los rubros de las cuentas que elijas allí.'
+      : 'No elegiste cuentas en Áreas de riesgo, por eso no hay rubros que evaluar.';
+    pintarResumen5(); pintarTabs5();
+    $('m5Nav').innerHTML = '<div class="cq-nav-t">Rubros</div>';
+    $('m5Main').innerHTML = `<div class="cuerpo"><div class="aviso warn">⚠️ <div>${msg} <button class="link" onclick="irModulo(3)">Ir a Áreas de riesgo →</button></div></div></div>`;
+    pintarMenu(); return;
+  }
   if (ed5 && ed5.rk !== sec5?.k) ed5 = null;   // PREGUNTAS DEL AUDITOR: el formulario es del rubro abierto
   pintarResumen5(); pintarTabs5(); pintarNav5(S); pintarMain5(S); pintarMenu();
 }
@@ -5432,10 +5458,11 @@ function pintarCOSO() {
 function pintarResumen5() {
   const e = actual, hayEEFF = e.eeff?.actual.bg && e.eeff?.actual.er;
   const c = contar(e, PESTANAS5.flatMap(k => seccionesComp(e, k).flatMap(preguntasSec)));
+  // RUBROS DEL CUESTIONARIO (2026-11-23): sin estados financieros no hay rubros en el Cuestionario; sin confirmar las áreas, tampoco
   const aviso = !hayEEFF
-    ? `<div class="aviso warn">⚠️ <div>Sin estados financieros cargados, los rubros de Actividades de control usan preguntas genéricas y no muestran saldos ni señales de riesgo.</div></div>`
+    ? `<div class="aviso warn">⚠️ <div>Sin estados financieros cargados, el Cuestionario por rubros queda vacío: sus rubros salen de las cuentas que elijas en Áreas de riesgo.</div></div>`
     : !e.empresa.tipo ? `<div class="aviso warn">⚠️ <div>No elegiste el tipo de empresa: el cuestionario usa las preguntas de una empresa comercial. <button class="link" onclick="irModulo(0)">Elegirlo en Datos del encargo →</button></div></div>`
-    : !e.riesgos?.confirmado ? `<div class="aviso warn">⚠️ <div>La selección de áreas de riesgo aún no está confirmada: los rubros prioritarios (!) pueden cambiar. <button class="link" onclick="irModulo(3)">Ir a Áreas de riesgo →</button></div></div>` : '';
+    : !e.riesgos?.confirmado ? `<div class="aviso warn">⚠️ <div>La selección de áreas de riesgo aún no está confirmada: el Cuestionario muestra sus rubros recién al confirmarla. <button class="link" onclick="irModulo(3)">Ir a Áreas de riesgo →</button></div></div>` : '';
   const sinTipo = c.sinTipo ? `<div class="aviso warn">⚠️ <div>Hay <b>${c.sinTipo}</b> respuesta${c.sinTipo === 1 ? '' : 's'} «NO» sin tipo de deficiencia (de diseño o de funcionamiento). Complétal${c.sinTipo === 1 ? 'a' : 'as'} en el cuestionario: mientras falte, la sección no se considera terminada.</div></div>` : '';
   // RESPUESTAS OBLIGATORIAS: recordatorio mientras falten respuestas
   const oblig = completa(c) ? '' : `<div class="aviso">🔒 <div>Responder todas las preguntas es obligatorio para pasar a Resultados. <button class="link" onclick="irPrimeraSinResponder()">Ir a la primera sin responder →</button></div></div>`;
@@ -5483,7 +5510,7 @@ function estadoSec(s) {
 function pintarMain5(S) {
   const s = sec5, i = ui5.idx[ui5.comp], R = actual.coso.resp, e = actual;
   const tipoEmp = TIPOS.find(x => x.k === e.empresa.tipo)?.n.toLowerCase();
-  const sup = s.clase === 'rubro' ? `Rubro ${s.num} de ${RUBROS_Q.length}` : s.clase === 'gen' ? 'Actividades de control · controles generales' : `${s.n} de ${S.length} · ${COMPONENTES[ui5.comp]}`;
+  const sup = s.clase === 'rubro' ? `Rubro ${s.num} de ${S.length}` : s.clase === 'gen' ? 'Actividades de control · controles generales' : `${s.n} de ${S.length} · ${COMPONENTES[ui5.comp]}`;
   const titulo = s.clase === 'rubro' ? s.n : s.clase === 'gen' ? 'Controles generales' : s.titulo;
   let caja = '';
   if (s.clase === 'rubro') {
@@ -5738,7 +5765,8 @@ function contextoRubros(e) {
   const matG = materialidadDe(e)?.global || 0, {alertas} = alertasFinancieras(e), ratios = calcularRatios();
   const elegidas = evaluarCuentas(e).filter(i => estadoSel(e, i).on);
   const TA = D.tb.A, VT = D.te.ventas || 0, C = {};
-  seccionesComp(e, 'CQ').forEach(s => {
+  const enCQ = rubrosElegidosCQ(e);   // RUBROS DEL CUESTIONARIO
+  seccionesComp(e, 'CQ', true).forEach(s => {
     const r = s.r, k = r.k, er = k === 'ing' || k === 'egr';
     const suma = g => cuentasRubroQ(e, k, g).reduce((t, c) => t + c.valor, 0);
     const v = suma('actual'), pv = hayAnt ? suma('anterior') : null, base = er ? VT : TA;
@@ -5764,7 +5792,7 @@ function contextoRubros(e) {
     const ctas = elegidas.filter(i => rubroQItem(i) === k), alto = ctas.filter(i => i.nivel === 'alto'), medio = ctas.filter(i => i.nivel === 'medio');
     if (alto.length) { pts += 2; why.push(`Cuentas de riesgo alto en Áreas de riesgo: ${alto.map(i => i.n).join(', ')} (+2).`); }
     else if (medio.length) { pts += 1; why.push(`Cuentas de riesgo moderado en Áreas de riesgo: ${medio.map(i => i.n).join(', ')} (+1).`); }
-    C[k] = {s, n:s.n, v, sinSaldo: Math.abs(v) < 0.005, imp, pts, why};
+    C[k] = {s, n:s.n, v, sinSaldo: Math.abs(v) < 0.005, imp, pts, why, fueraCQ: !enCQ.has(k)};   // fueraCQ: el rubro no está en el cuestionario
   });
   return C;
 }
@@ -5818,7 +5846,7 @@ function riesgosMatriz(e) {
   // Controles ligados: preguntas del rubro preferidas o que cubren sus aseveraciones, más las generales
   const ligar = (def, area) => {
     if (def.qs) return def.qs.map(q => porId[q.id] || q);
-    const c = area === 'gen' ? null : C[area];
+    const c = area === 'gen' || C[area]?.fueraCQ ? null : C[area];   // RUBROS DEL CUESTIONARIO: sin preguntas del rubro si no está en el cuestionario
     let Q = [];
     if (c) {
       const Qr = preguntasSec(c.s);
@@ -6085,7 +6113,7 @@ function detalle7(f) {
           : '<p class="muted">No hay preguntas del Cuestionario ligadas a este riesgo.</p>'}
         <p class="m7m-calc">Controles ${EFICACIA[f.efi].toLowerCase()}${f.ncCtrl != null ? ` (${pct(f.ncCtrl, 0)} de cumplimiento)` : f.efi === 'na' ? ' (no hay controles en los que confiar)' : ''} → riesgo de control <b>${NIV3[RC_EFI[f.efi]].toLowerCase()}</b>${f.piso ? '; se eleva a <b>moderado</b> porque el ambiente de control es débil' : ''}.</p>
         <label class="m7m-lab">Riesgo de control final${sel('rc', f.rcAuto, NIV3)}</label>
-        ${f.area !== 'gen' ? `<button class="link" onclick="ui5.comp='CQ';ui5.idx.CQ=${RUBROS_Q.findIndex(r => r.k === f.area)};irModulo(4)">Ir al Cuestionario de este rubro →</button>` : ''}</div>
+        ${f.area !== 'gen' ? `<button class="link" onclick="ui5.comp='CQ';ui5.idx.CQ=${Math.max(0, seccionesComp(actual, 'CQ').findIndex(s => s.k === f.area))};irModulo(4)">Ir al Cuestionario de este rubro →</button>` : ''}</div>
       <div class="m7m-dc"><h4>③ Riesgo de detección y respuesta</h4>
         <p class="m7m-calc">Riesgo inherente ${NIV3[f.ri].toLowerCase()} y riesgo de control ${NIV3[f.rc].toLowerCase()} → riesgo de detección aceptable <b>${NIV3[f.rd].toLowerCase()}</b>.
           Enfoque <b>${f.enf.toLowerCase()}</b>, alcance <b>${ALCANCE7[f.alc].toLowerCase()}</b>${f.alc !== f.rd ? ' (no puede ser reducido por ser un riesgo significativo)' : ''}.</p>
